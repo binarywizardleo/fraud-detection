@@ -85,6 +85,7 @@ else:
         # Write JSON to file using dbutils.fs (required for Unity Catalog volumes)
         # Single-line JSON format
         json_content = json.dumps(row_dict)
+
         dbutils.fs.put(file_path, json_content, overwrite=True)
         
         print(f"Row {index + 1}/{len(df)}: Written {filename}")

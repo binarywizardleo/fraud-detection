@@ -1,87 +1,32 @@
+"""
+Alert Layer: High-Value Transaction Alert Email Notifications
+============================================================
+Sends email alerts for transactions that exceed customer transaction limits.
+Reads from the gold high_value_transaction_alerts table and sends an email per alert.
+
+Dependencies:
+- fraud_detection.gold.high_value_transaction_alerts
+"""
+
 from pyspark import pipelines as dp
-from pyspark.sql.functions import col, concat_ws, md5, concat, current_timestamp, lit
 from pyspark.sql import DataFrame
-
-
-@dp.table(
-    name = 'high_value_transaction_alert'
-    , comment = 'this table stores transactions with high alert'
-)
-def high_value_transaction_alert() -> DataFrame:
-    tdf = spark.readStream.table("fraud_detection.silver.transactions_dp")
-    cdf = spark.read.table("fraud_detection.silver.customers")
-    
-    return tdf.join(cdf, on='customer_id', how='left') \
-        .filter(col('amount') >= col('transaction_limit')) \
-        .select(
-            # Alert ID - unique identifier for each alert
-            md5(concat(
-                col('transaction_id'),
-                col('transaction_timestamp').cast('string')
-            )).alias('alert_id'),
-            
-            # Transaction details
-            col('transaction_id'),
-            col('customer_id'),
-            tdf['card_number'].alias('transaction_card_number'),
-            col('amount'),
-            col('currency'),
-            col('transaction_timestamp'),
-            
-            # Merchant details
-            col('merchant_id'),
-            col('merchant_name'),
-            col('merchant_category'),
-            
-            # Location
-            tdf['city'].alias('transaction_city'),
-            tdf['country'].alias('transaction_country'),
-            col('is_international'),
-            
-            # Customer details
-            concat_ws(' ', col('first_name'), col('last_name')).alias('customer_full_name'),
-            col('first_name'),
-            col('last_name'),
-            lit('binary.wizard.leo@gmail.com').alias('email'),
-            cdf['city'].alias('customer_city'),
-            cdf['country'].alias('customer_country'),
-            col('risk_score'),
-            col('transaction_limit'),
-            cdf['card_number'].alias('customer_card_number'),
-            
-            # Alert context
-            (col('amount') - col('transaction_limit')).alias('amount_over_limit'),
-            ((col('amount') / col('transaction_limit')) * 100).alias('percent_over_limit'),
-            current_timestamp().alias('alert_timestamp'),
-            
-            # Additional context
-            col('payment_channel'),
-            col('device_id'),
-            col('status')
-        )
-
-
-# ============================================================================
-# REAL-TIME EMAIL ALERT SYSTEM
-# ============================================================================
 
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
-# Get Gmail credentials (outside handler for serialization compatibility)
+# Gmail credentials (outside handler for serialization compatibility)
 EMAIL = "binary.wizard.leo@gmail.com"
 APP_PASSWORD = dbutils.secrets.get(scope="fraud-detection", key="gmail_api_key")
 
 
-def send_alert_email(transaction_row):
+def send_high_value_alert_email(transaction_row):
     """
     Send email alert for a single high-value transaction.
     """
     try:
-        # Extract transaction details
         customer_name = transaction_row.customer_full_name or "Valued Customer"
-        customer_email = transaction_row.email
+        customer_email = transaction_row.customer_email
         amount = transaction_row.amount
         currency = transaction_row.currency
         merchant = transaction_row.merchant_name
@@ -91,17 +36,15 @@ def send_alert_email(transaction_row):
         percent_over_limit = transaction_row.percent_over_limit
         transaction_city = transaction_row.transaction_city
         transaction_country = transaction_row.transaction_country
-        
-        # Create email subject
-        subject = f"🚨 High-Value Transaction Alert - {currency} {amount:,.2f}"
-        
-        # Create HTML email body
+
+        subject = f"\U0001f6a8 High-Value Transaction Alert - {currency} {amount:,.2f}"
+
         body = f"""
         <html>
         <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
             
             <div style="background-color: #dc3545; color: white; padding: 20px; text-align: center;">
-                <h2 style="margin: 0;">🚨 High-Value Transaction Alert</h2>
+                <h2 style="margin: 0;">\U0001f6a8 High-Value Transaction Alert</h2>
             </div>
             
             <div style="padding: 20px; background-color: #f8f9fa;">
@@ -146,10 +89,10 @@ def send_alert_email(transaction_row):
                 </div>
                 
                 <div style="background-color: #fff3cd; padding: 15px; border-left: 4px solid #ffc107; margin: 20px 0;">
-                    <h4 style="margin-top: 0; color: #856404;">⚠️ Action Required</h4>
+                    <h4 style="margin-top: 0; color: #856404;">\u26a0\ufe0f Action Required</h4>
                     <p style="margin: 0;">
-                        If you authorized this transaction, no action is needed. If you did not authorize this 
-                        transaction, please contact our fraud department immediately at <strong>1-800-FRAUD-HELP</strong> 
+                        If you authorized this transaction, no action is needed. If you did not authorize this
+                        transaction, please contact our fraud department immediately at <strong>1-800-FRAUD-HELP</strong>
                         or reply to this email.
                     </p>
                 </div>
@@ -171,24 +114,22 @@ def send_alert_email(transaction_row):
         </body>
         </html>
         """
-        
-        # Create email message
+
         msg = MIMEMultipart()
         msg["From"] = EMAIL
         msg["To"] = customer_email
         msg["Subject"] = subject
         msg.attach(MIMEText(body, "html"))
-        
-        # Send email
+
         with smtplib.SMTP("smtp.gmail.com", 587) as server:
             server.starttls()
             server.login(EMAIL, APP_PASSWORD)
             server.send_message(msg)
         
-        return f"✅ Email sent to {customer_email} for transaction {transaction_id}"
-        
+        return f"\u2705 Email sent to {customer_email} for transaction {transaction_id}"
+    
     except Exception as e:
-        return f"❌ Error sending email for transaction {transaction_row.transaction_id}: {str(e)}"
+        return f"\u274c Error sending email for transaction {transaction_row.transaction_id}: {str(e)}"
 
 
 @dp.foreach_batch_sink(name="high_value_alert_email_sink")
@@ -196,17 +137,15 @@ def send_high_value_alerts(df: DataFrame, batch_id: int):
     """
     ForEachBatch sink that sends email alerts for each high-value transaction in the micro-batch.
     """
-    # Collect transactions from the batch (typically small for alerts)
     transactions = df.collect()
     
     print(f"\n{'='*80}")
     print(f"Processing batch {batch_id}: {len(transactions)} high-value transaction(s) detected")
     print(f"{'='*80}\n")
     
-    # Send email for each transaction
     for idx, transaction in enumerate(transactions, 1):
         print(f"[{idx}/{len(transactions)}] Sending alert for transaction: {transaction.transaction_id}")
-        result = send_alert_email(transaction)
+        result = send_high_value_alert_email(transaction)
         print(f"    {result}")
     
     print(f"\n{'='*80}")
@@ -218,6 +157,6 @@ def send_high_value_alerts(df: DataFrame, batch_id: int):
 def high_value_alert_stream():
     """
     Stream high-value transaction alerts to the email sink.
-    Reads from the high_value_transaction_alert table and sends each transaction to the email sink.
+    Reads from the high_value_transaction_alerts gold table and sends each transaction to the email sink.
     """
-    return spark.readStream.table("fraud_detection.gold.high_value_transaction_alert")        
+    return spark.readStream.table("fraud_detection.gold.high_value_transaction_alerts")
