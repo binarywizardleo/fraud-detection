@@ -54,6 +54,7 @@ class CustomerGenerator:
             first_name=first_name,
             last_name=last_name,
             gender=gender,
+            email="binary.wizard.leo@gmail.com",
             age=max(18, min(75, int(self.fake.random_int(min=18, max=75)))),
             city=city,
             state=state,

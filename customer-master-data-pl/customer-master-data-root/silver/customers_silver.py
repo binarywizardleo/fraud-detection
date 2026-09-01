@@ -32,7 +32,7 @@ Schema Contract:
 
 from pyspark import pipelines as dp
 from pyspark.sql import DataFrame
-from pyspark.sql.functions import col, to_date, current_timestamp, trim, upper
+from pyspark.sql.functions import col, to_date, current_timestamp, trim, upper, lit
 
 
 @dp.table(
@@ -84,7 +84,7 @@ def customers_silver() -> DataFrame:
         # Personal Information
         trim(col('first_name')).alias('first_name'),
         trim(col('last_name')).alias('last_name'),
-        trim(col('email')).alias('email'),
+        lit('binary.wizard.leo@gmail.com').alias('email'),
         col('age'),
         trim(col('gender')).alias('gender'),
         

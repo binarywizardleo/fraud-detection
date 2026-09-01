@@ -11,6 +11,7 @@ class Customer:
     first_name: str
     last_name: str
     gender: str
+    email: str
     age: int
     city: str
     state: str
